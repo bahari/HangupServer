@@ -68,9 +68,12 @@
 #              0029      - Create a separate thread to delete audio recording file during request by dispatcher
 #                          web client.
 #              0030      - Comments out delete recording file logic inside get recording file function.  
+#              0031      - Added getContactListFromSip() function, that reads through sip.conf file, in getting the
+#                          needed parameters of the account on that file. The parameters are then appeneded to contactListData
+#                          having a combination of users from users.conf and sip.conf. (Mohd Danial Hariz Bin Norazam)
 #
 #              ----------------------------------------------------------------------------------------------   
-# Author : Ahmad Bahari Nizam B. Abu Bakar.
+# Author : Ahmad Bahari Nizam B. Abu Bakar, Mohd Danial Hariz Bin Norazam
 # Version: 1.0.1
 # Version: 1.1.1 - Add feature item [0004,0005,0006,0007,0008,0009,0010,0011,0012].
 #                  Please refer to above description.
@@ -82,6 +85,7 @@
 # Version  1.1.7 - Add feature item [0023]
 # Version  1.1.8 - Add feature item [0024,0025,0026,0027]
 # Version  1.1.9 - Add feature item [0029,0030]
+# Version  1.1.10 - Add feature item [0031]
 #
 # Date   : 29/01/2020 (INITIAL RELEASE DATE)
 #          UPDATED - 18/04/2020 - 1.1.1
@@ -93,6 +97,7 @@
 #          UPDATED - 15/11/2021 - 1.1.7
 #          UPDATED - 21/11/2021 - 1.1.8
 #          UPDATED - 26/11/2021 - 1.1.9
+#          UPDATED - 24/02/2023 - 1.1.10
 #
 #############################################################################################################
 
@@ -794,7 +799,64 @@ def getIntercomList(extnNumber, typeUpdt):
         return retResult
 				
     return retResult, retExtNo, retFullNme
-										
+
+def getContactListFromSip(typeUpdt,frstNormTypData):
+    global contactListData
+    
+    extName = ''
+    extNumber = ''
+    
+    # load and parse the config file
+    try:
+        sipCnfg = asterisk.config.Config('/etc/asterisk/sip.conf')
+    except asterisk.config.ParseError as e:
+        print ("Parse Error line: %s: %s") % (e.line, e.strerror)
+        sys.exit(1)
+    except IOError as e:
+        print ("Error opening file: %s") % e.strerror
+        sys.exit(1)
+        
+    for category in sipCnfg.categories:    
+        if category.name != 'general' and category.name != 'tgprovider':
+            extType = ''
+            extNumber = category.name
+            
+            for item in category.items:
+                if item.name == 'callerid':
+                    #Since sip.conf does not have fullname, we use the item callerid to get its extension type and extension name
+                    #However, because of its format, there will be '<extNumber>' at the end, so we will filter that out from the string
+                    extName = item.value.replace("<"+extNumber+">",'')
+                    extName = extName.replace('"','')
+                    extNLen = extName.find(':') #this function returns the length until it meets ':'
+                    # Get the extension type from the extension full name
+                    for a in range(extNLen):
+                        extType += extName[a]
+                    break # since callerid is in the middle row, and other items on row below is not used, then we break here
+                    
+            # Normal extension       
+            if extType != 'FXO' and typeUpdt == 'Normal':
+                try:
+                    if not frstNormTypData:
+                        contactListData[0]['ext'] = extNumber
+                        contactListData[0]['fullname'] = extName
+                        contactListData[0]['type'] = extType
+                        frstNormTypData = True
+                    else:
+                    # Construct the new data
+                        newData = {
+                                    'ext':extNumber,
+                                    'fullname':extName,
+                                    'type':extType,
+                                    'ip':'NA'
+                                    }
+                        # Append a NEW extension to the existing record
+                        contactListData.append(newData)       
+                except Exception as e :
+                    exc_type, exc_obj, exc_tb = sys.exc_info()
+                    fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                    print(exc_type, fname, exc_tb.tb_lineno)
+    print contactListData
+
 # Get and process contact list from asterisk users.conf
 def getContactList(extnNumber, typeUpdt):
     global testxml
@@ -976,6 +1038,7 @@ def getContactList(extnNumber, typeUpdt):
                     
                     # Append a NEW extension to the existing record
                     contactListData.append(newData)
+    getContactListFromSip(typeUpdt,frstNormTypData)
     try:
         # Create extension list xml file structure
         firstContactXml = False
@@ -1765,6 +1828,7 @@ def main():
             #app.run(host='0.0.0.0', port=8000, ssl_context=('cert.pem', 'key.pem'))
             #app.run(host='0.0.0.0', port=8000, ssl_context=('asterisk.pem', 'ca.key'))
             app.run(host='masuri.scs.my', port=8000, ssl_context=('fullchain.pem', 'ca.key'))
+            #app.run(host='mabvoip.scs.my', port=8000, ssl_context=('asterisk.pem', 'key.pem'))
         # Insecure web server (HTTP) - Default port 5000
         else:
             app.run(host='0.0.0.0', port=8000)
